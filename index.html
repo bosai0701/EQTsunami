@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>津波情報</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<style>
+body{
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  background:#0f0f12;
+  color:#fff;
+}
+header{background:#1c1f26;padding:15px 20px;font-size:22px;font-weight:600;border-bottom:1px solid #333;}
+.container{padding:20px;max-width:900px;margin:auto;}
+.card{background:#1b1e25;border-radius:10px;margin-bottom:20px;overflow:hidden;box-shadow:0 0 10px rgba(0,0,0,0.4);}
+.tsunami-box{border-radius:8px;margin:15px;overflow:hidden;display:none;}
+.major{background:#3a0000;}
+.warning{background:#3a1a00;}
+.watch{background:#3a3200;}
+.forecast{background:#00233a;}
+.tsunami-title{padding:10px 14px;font-weight:600;font-size:16px;}
+.major .tsunami-title{background:rgb(200,0,255);}
+.warning .tsunami-title{background:rgb(255,40,0);}
+.watch .tsunami-title{background:rgb(250,245,0);color:#000;}
+.forecast .tsunami-title{background:#00BFFF;}
+.area{padding:8px;border-bottom:1px solid #333;font-size:14px;}
+.area:last-child{border-bottom:none;}
+.status{color:#facc15;font-size:13px;}
+.height{color:#7dd3fc;}
+.arrival{color:#86efac;font-size:13px;}
+#topInfo{margin-bottom:20px;padding:15px;background:#1c1f26;border-radius:10px;line-height:1.6;}
+#no-info {
+  padding: 20px;
+  text-align: center;
+  font-weight: bold;
+  color: #ccc;
+  display: none;
+}
+</style>
+</head>
+<body>
+
+<header>津波情報</header>
+<div class="container">
+  <div id="topInfo"></div>
+  <div class="card">
+    <div id="no-info">現在、大津波警報・津波警報・津波注意報・津波予報（若干の海面変動）は発表されていません。</div>
+    
+    <div id="majorBox" class="tsunami-box major"><div class="tsunami-title">大津波警報</div><div id="major"></div></div>
+    <div id="warningBox" class="tsunami-box warning"><div class="tsunami-title">津波警報</div><div id="warning"></div></div>
+    <div id="watchBox" class="tsunami-box watch"><div class="tsunami-title">津波注意報</div><div id="watch"></div></div>
+    <div id="forecastBox" class="tsunami-box forecast"><div class="tsunami-title">津波予報（若干の海面変動）</div><div id="forecast"></div></div>
+  </div>
+</div>
+
+<script>
+let prevKinds = {};
+let isFirstLoad = true;
+
+function formatDate(datetime){
+  if(!datetime) return "-";
+  const d = new Date(datetime);
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  const h = String(d.getHours()).padStart(2,'0');
+  const min = String(d.getMinutes()).padStart(2,'0');
+  return `${y}年${m}月${day}日${h}:${min}`;
+}
+
+async function load(){
+  const noInfoEl = document.getElementById("no-info");
+  const topInfoEl = document.getElementById("topInfo");
+
+  try {
+    const listUrl = "https://www.jma.go.jp/bosai/tsunami/data/list.json";
+    const list = await fetch(listUrl).then(r => r.json());
+
+    const targetItem = list.find(i => 
+      i.ttl.includes("津波") &&
+      !i.ttl.includes("観測")
+    );
+
+    if(!targetItem){
+      noInfoEl.style.display = "block";
+      topInfoEl.innerHTML = "現在、津波に関する情報はありません。";
+      return;
+    }
+
+    const detailUrl = `https://www.jma.go.jp/bosai/tsunami/data/${targetItem.json}`;
+    const data = await fetch(detailUrl).then(r => r.json());
+
+    const isCancelled = data.Head.InfoType === "取消";
+    const items = data.Body?.Tsunami?.Forecast?.Item || [];
+
+    if (items.length === 0 || isCancelled) {
+      noInfoEl.style.display = "block";
+      topInfoEl.innerHTML = "現在、津波に関する情報はありません。";
+      ["majorBox","warningBox","watchBox","forecastBox"].forEach(id => {
+        document.getElementById(id).style.display = "none";
+      });
+      return;
+    }
+
+    noInfoEl.style.display = "none";
+
+    const targetDate = formatDate(data.Head.TargetDateTime);
+    const infoType = data.Head.InfoType;
+    const eq = data.Body.Earthquake ? data.Body.Earthquake[0] : null;
+    const place = eq ? eq.Hypocenter.Area.Name : "不明";
+    const magnitude = eq ? eq.Magnitude : "-";
+    const text = data.Body.Comments?.WarningComment?.Text || "";
+
+    topInfoEl.innerHTML = `
+      <div><b>発表日時：</b>${targetDate} ${infoType}</div>
+      <div><b>場所：</b>${place}</div>
+      <div><b>マグニチュード：</b>${magnitude}</div>
+      <div>${text.replace(/\n/g,"<br>")}</div>
+    `;
+
+    const groups = {major:"", warning:"", watch:"", forecast:""};
+
+    items.forEach(i=>{
+      const kind = i.Category.Kind.Name;
+      const area = i.Area.Name;
+      const height = i.MaxHeight?.TsunamiHeight ?? "-";
+
+      // ▼ 到達予想時刻（最重要追加）
+      const arrival = formatDate(i.FirstHeight?.ArrivalTime);
+
+      let target="forecast";
+      if(kind.includes("大津波")) target="major";
+      else if(kind.includes("警報")) target="warning";
+      else if(kind.includes("注意報")) target="watch";
+
+      let statusText = "発表"; 
+      if(!isFirstLoad && prevKinds[area] && prevKinds[area] !== kind){
+        statusText = "切替";
+      }
+
+      prevKinds[area] = kind;
+
+      groups[target] += `
+        <div class="area">
+          <b>${area}</b>
+          <div class="status">${statusText}</div>
+          <div class="arrival">到達予想 : ${arrival}</div>
+          <div class="height">高さ : ${height}m</div>
+        </div>`;
+    });
+
+    const render = (id, boxId) => {
+      const el = document.getElementById(id);
+      const box = document.getElementById(boxId);
+      if(groups[id]){
+        box.style.display = "block";
+        el.innerHTML = groups[id];
+      } else {
+        box.style.display = "none";
+        el.innerHTML = "";
+      }
+    };
+
+    render("major","majorBox");
+    render("warning","warningBox");
+    render("watch","watchBox");
+    render("forecast","forecastBox");
+
+    isFirstLoad = false;
+
+  } catch (error) {
+    console.error("データの読み込みに失敗しました:", error);
+    noInfoEl.style.display = "block";
+    noInfoEl.innerText = "データの取得に失敗しました。";
+  }
+}
+
+load();
+setInterval(load, 30000); 
+</script>
+
+</body>
+</html>
