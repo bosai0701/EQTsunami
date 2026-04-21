@@ -127,7 +127,6 @@ async function load(){
       const area = i.Area.Name;
       const height = i.MaxHeight?.TsunamiHeight ?? "-";
 
-      // ▼ 到達予想時刻（最重要追加）
       const arrival = formatDate(i.FirstHeight?.ArrivalTime);
 
       let target="forecast";
@@ -135,7 +134,7 @@ async function load(){
       else if(kind.includes("警報")) target="warning";
       else if(kind.includes("注意報")) target="watch";
 
-      let statusText = "発表"; 
+      let statusText = ""; 
       if(!isFirstLoad && prevKinds[area] && prevKinds[area] !== kind){
         statusText = "切替";
       }
@@ -145,7 +144,7 @@ async function load(){
       groups[target] += `
         <div class="area">
           <b>${area}</b>
-          <div class="status">${statusText}</div>
+          ${statusText ? `<div class="status">${statusText}</div>` : ``}
           <div class="arrival">到達予想 : ${arrival}</div>
           <div class="height">高さ : ${height}m</div>
         </div>`;
